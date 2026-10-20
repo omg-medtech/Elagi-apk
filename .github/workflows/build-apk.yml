@@ -137,7 +137,7 @@ jobs:
             }catch(e){}
             function sync(){
               try{
-                if(!window.S||!S.user||typeof window.__alarmText!=="function"){return}
+                if(typeof S==="undefined"||!S.user||typeof window.__alarmText!=="function"){return}
                 var now=Date.now(),L=[],u=S.user;
                 (u.meds||[]).forEach(function(m){if(m.nextAt>now+2000)L.push({id:"m"+m.id,at:m.nextAt,title:"عِلاجي",body:String(m.name||"").split(/\s+/).slice(0,3).join(" "),text:window.__alarmText("med",m)})});
                 (u.tests||[]).forEach(function(t){if(!t.done&&t.at>now+2000)L.push({id:"t"+t.id,at:t.at,title:"عِلاجي",body:t.ar||"",text:window.__alarmText("test",t)})});
@@ -145,11 +145,11 @@ jobs:
                 AndroidElagi.sync(JSON.stringify(L.slice(0,60)));
               }catch(e){}
             }
-            var rdy=setInterval(function(){try{if(window.__bootDone||(window.S&&S.user)){AndroidElagi.ready();clearInterval(rdy)}}catch(e){}},300);
+            var rdy=setInterval(function(){try{if(window.__bootDone||(typeof S!=="undefined"&&S.user)){AndroidElagi.ready();clearInterval(rdy)}}catch(e){}},300);
             /* WebView has no usable speechSynthesis: route the app's voice through Android TTS */
             var vv=setInterval(function(){try{
               if(typeof Voice!=="undefined"&&Voice&&Voice.say){
-                Voice.say=function(parts){try{if(window.S&&S.user&&S.user.set&&S.user.set.voice===false)return;AndroidElagi.speak((parts||[]).map(function(p){return p.t}).filter(Boolean).join(". "))}catch(e){}};
+                Voice.say=function(parts){try{if(typeof S!=="undefined"&&S.user&&S.user.set&&S.user.set.voice===false)return;AndroidElagi.speak((parts||[]).map(function(p){return p.t}).filter(Boolean).join(". "))}catch(e){}};
                 Voice.stop=function(){try{AndroidElagi.stopSpeak()}catch(e){}};
                 clearInterval(vv);
               }}catch(e){}},500);
