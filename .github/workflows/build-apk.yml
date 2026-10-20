@@ -1,0 +1,707 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.7" }
+      - name: Generate the Android project
+        run: |
+          set -e
+          mkdir -p /tmp/proj && cd /tmp/proj
+          mkdir -p "app"
+          cat > 'app/build.gradle' <<'EOF_0'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'app.elagi'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'app.elagi'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+          }
+          dependencies { implementation 'androidx.core:core:1.13.1' }
+          EOF_0
+          mkdir -p "app/src/main"
+          cat > 'app/src/main/AndroidManifest.xml' <<'EOF_1'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+              <uses-permission android:name="android.permission.CAMERA"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+              <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.VIBRATE"/>
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+              <uses-feature android:name="android.hardware.camera" android:required="false"/>
+              <uses-feature android:name="android.hardware.location" android:required="false"/>
+ 
+              <application
+                  android:label="عِلاجي"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:allowBackup="false"
+                  android:usesCleartextTraffic="false"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+ 
+                  <activity android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode|locale|layoutDirection"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+ 
+                  <receiver android:name=".AlarmReceiver" android:exported="false"/>
+                  <receiver android:name=".BootReceiver" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                          <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                      </intent-filter>
+                  </receiver>
+                  <service android:name=".AlarmService" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
+ 
+                  <provider android:name="androidx.core.content.FileProvider"
+                      android:authorities="app.elagi.files" android:exported="false" android:grantUriPermissions="true">
+                      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths"/>
+                  </provider>
+              </application>
+          </manifest>
+          EOF_1
+          mkdir -p "app/src/main/assets"
+          cat > 'app/src/main/assets/inject.js' <<'EOF_2'
+          (function(){
+            if(window.__elagiNative)return;window.__elagiNative=true;
+            /* WebView has no Notification API: report it as granted so the sign-up gate passes (reminders are native here) */
+            try{
+              if(!("Notification" in window)||Notification.permission!=="granted"){
+                var N=function(){};N.permission="granted";N.requestPermission=function(cb){if(cb)cb("granted");return Promise.resolve("granted")};
+                Object.defineProperty(window,"Notification",{value:N,configurable:true,writable:true});
+              }
+            }catch(e){}
+            /* save PDFs/files generated in the page (blob downloads) to the Downloads folder */
+            function saveBlobLink(a){
+              var n=a.download||("elagi-"+Date.now()+".pdf");
+              fetch(a.href).then(function(r){return r.blob()}).then(function(bl){var fr=new FileReader();fr.onloadend=function(){var d=String(fr.result);AndroidElagi.saveFile(n,bl.type||"",d.substring(d.indexOf(",")+1))};fr.readAsDataURL(bl)});
+            }
+            try{
+              var oc=HTMLAnchorElement.prototype.click;
+              HTMLAnchorElement.prototype.click=function(){if(this.download&&/^blob:/.test(this.href)){saveBlobLink(this);return}return oc.apply(this,arguments)};
+              var od=EventTarget.prototype.dispatchEvent;
+              EventTarget.prototype.dispatchEvent=function(e){if(this instanceof HTMLAnchorElement&&e&&e.type==="click"&&this.download&&/^blob:/.test(this.href)){saveBlobLink(this);return true}return od.apply(this,arguments)};
+            }catch(e){}
+            function sync(){
+              try{
+                if(!window.S||!S.user||typeof window.__alarmText!=="function"){return}
+                var now=Date.now(),L=[],u=S.user;
+                (u.meds||[]).forEach(function(m){if(m.nextAt>now+2000)L.push({id:"m"+m.id,at:m.nextAt,title:"عِلاجي",body:String(m.name||"").split(/\s+/).slice(0,3).join(" "),text:window.__alarmText("med",m)})});
+                (u.tests||[]).forEach(function(t){if(!t.done&&t.at>now+2000)L.push({id:"t"+t.id,at:t.at,title:"عِلاجي",body:t.ar||"",text:window.__alarmText("test",t)})});
+                L.sort(function(a,b){return a.at-b.at});
+                AndroidElagi.sync(JSON.stringify(L.slice(0,60)));
+              }catch(e){}
+            }
+            window.__nativeSync=sync;
+            setInterval(sync,15000);setTimeout(sync,2500);
+            document.addEventListener("visibilitychange",sync);
+          })();
+          EOF_2
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/AlarmReceiver.java' <<'EOF_3'
+          package app.elagi;
+ 
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+ 
+          import androidx.core.content.ContextCompat;
+ 
+          public class AlarmReceiver extends BroadcastReceiver {
+              @Override
+              public void onReceive(Context c, Intent intent) {
+                  if (MainActivity.visible) return; // the open app rings by itself
+                  Intent s = new Intent(c, AlarmService.class);
+                  s.putExtra("id", intent.getStringExtra("id"));
+                  s.putExtra("title", intent.getStringExtra("title"));
+                  s.putExtra("body", intent.getStringExtra("body"));
+                  s.putExtra("text", intent.getStringExtra("text"));
+                  ContextCompat.startForegroundService(c, s);
+              }
+          }
+          EOF_3
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/AlarmScheduler.java' <<'EOF_4'
+          package app.elagi;
+ 
+          import android.app.AlarmManager;
+          import android.app.PendingIntent;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.net.Uri;
+          import android.os.Build;
+ 
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+ 
+          final class AlarmScheduler {
+              private static final String PREFS = "elagi_alarms", KEY = "items";
+              private AlarmScheduler() {}
+ 
+              private static PendingIntent pi(Context c, String id, JSONObject o, int flags) {
+                  Intent i = new Intent(c, AlarmReceiver.class);
+                  i.setData(Uri.parse("elagi://alarm/" + id));
+                  if (o != null) {
+                      i.putExtra("id", id);
+                      i.putExtra("title", o.optString("title", "عِلاجي"));
+                      i.putExtra("body", o.optString("body", ""));
+                      i.putExtra("text", o.optString("text", ""));
+                  }
+                  return PendingIntent.getBroadcast(c, id.hashCode(), i, flags | PendingIntent.FLAG_IMMUTABLE);
+              }
+ 
+              private static JSONArray load(Context c) {
+                  try {
+                      return new JSONArray(c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "[]"));
+                  } catch (Exception e) {
+                      return new JSONArray();
+                  }
+              }
+ 
+              static void sync(Context c, String json) {
+                  JSONArray fresh;
+                  try { fresh = new JSONArray(json); } catch (Exception e) { return; }
+                  SharedPreferences sp = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+                  if (fresh.toString().equals(sp.getString(KEY, ""))) return;
+                  cancelAll(c);
+                  sp.edit().putString(KEY, fresh.toString()).apply();
+                  scheduleAll(c);
+              }
+ 
+              static void cancelAll(Context c) {
+                  AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+                  JSONArray old = load(c);
+                  for (int k = 0; k < old.length(); k++) {
+                      JSONObject o = old.optJSONObject(k);
+                      if (o == null) continue;
+                      am.cancel(pi(c, o.optString("id"), null, PendingIntent.FLAG_UPDATE_CURRENT));
+                  }
+              }
+ 
+              static void scheduleAll(Context c) {
+                  AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+                  JSONArray arr = load(c);
+                  long now = System.currentTimeMillis();
+                  boolean exact = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms();
+                  for (int k = 0; k < arr.length(); k++) {
+                      JSONObject o = arr.optJSONObject(k);
+                      if (o == null) continue;
+                      long at = o.optLong("at");
+                      if (at <= now + 1000) continue;
+                      String id = o.optString("id");
+                      PendingIntent p = pi(c, id, o, PendingIntent.FLAG_UPDATE_CURRENT);
+                      try {
+                          if (exact) {
+                              Intent show = new Intent(c, MainActivity.class);
+                              PendingIntent sp = PendingIntent.getActivity(c, 7, show, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                              am.setAlarmClock(new AlarmManager.AlarmClockInfo(at, sp), p);
+                          } else {
+                              am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p);
+                          }
+                      } catch (SecurityException e) {
+                          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p);
+                      }
+                  }
+              }
+          }
+          EOF_4
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/AlarmService.java' <<'EOF_5'
+          package app.elagi;
+ 
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.media.AudioAttributes;
+          import android.media.MediaPlayer;
+          import android.media.RingtoneManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Handler;
+          import android.os.IBinder;
+          import android.os.Looper;
+          import android.os.PowerManager;
+          import android.speech.tts.TextToSpeech;
+          import android.speech.tts.UtteranceProgressListener;
+ 
+          import androidx.core.app.NotificationCompat;
+ 
+          import java.util.Locale;
+ 
+          /** Plays the bell, then speaks the reminder aloud, even if the app is closed. */
+          public class AlarmService extends Service {
+              private static final String CH = "elagi_alarm";
+              private static final int NID = 4201;
+              private final Handler h = new Handler(Looper.getMainLooper());
+              private TextToSpeech tts;
+              private MediaPlayer mp;
+              private PowerManager.WakeLock wl;
+              private int gen = 0;
+              private String lastTitle = "عِلاجي", lastBody = "";
+ 
+              @Override public IBinder onBind(Intent i) { return null; }
+ 
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  if (intent != null && "STOP".equals(intent.getAction())) { finish(); return START_NOT_STICKY; }
+                  final int my = ++gen;
+                  String title = intent != null ? intent.getStringExtra("title") : null;
+                  String body = intent != null ? intent.getStringExtra("body") : null;
+                  final String text = intent != null ? intent.getStringExtra("text") : null;
+                  if (title == null) title = "عِلاجي";
+                  if (body == null) body = "";
+                  lastTitle = title; lastBody = body;
+                  channel();
+                  Notification n = build(title, body, true);
+                  try {
+                      if (Build.VERSION.SDK_INT >= 29) startForeground(NID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+                      else startForeground(NID, n);
+                  } catch (Exception e) {
+                      try { ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(NID, n); } catch (Exception ignored) {}
+                  }
+                  try {
+                      if (wl == null) {
+                          PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                          wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "elagi:alarm");
+                      }
+                      if (!wl.isHeld()) wl.acquire(3 * 60 * 1000L);
+                  } catch (Exception ignored) {}
+                  releasePlayers();
+                  chime(new Runnable() { @Override public void run() { if (my == gen) speak(text, my); } });
+                  h.postDelayed(new Runnable() { @Override public void run() { if (my == gen) finish(); } }, 90 * 1000L);
+                  return START_NOT_STICKY;
+              }
+ 
+              private void channel() {
+                  if (Build.VERSION.SDK_INT >= 26) {
+                      NotificationChannel c = new NotificationChannel(CH, "تنبيهات الأدوية", NotificationManager.IMPORTANCE_HIGH);
+                      c.setSound(null, null);
+                      c.enableVibration(true);
+                      c.setVibrationPattern(new long[]{0, 400, 150, 400, 150, 600});
+                      c.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                      ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(c);
+                  }
+              }
+ 
+              private Notification build(String title, String body, boolean ongoing) {
+                  Intent open = new Intent(this, MainActivity.class);
+                  open.putExtra("alarm", true);
+                  open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                  PendingIntent pi = PendingIntent.getActivity(this, 11, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                  Intent stop = new Intent(this, AlarmService.class).setAction("STOP");
+                  PendingIntent sp = PendingIntent.getService(this, 12, stop, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                  NotificationCompat.Builder b = new NotificationCompat.Builder(this, CH)
+                          .setSmallIcon(R.drawable.ic_stat)
+                          .setContentTitle(title).setContentText(body)
+                          .setPriority(NotificationCompat.PRIORITY_MAX)
+                          .setCategory(NotificationCompat.CATEGORY_ALARM)
+                          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                          .setContentIntent(pi)
+                          .addAction(0, "إيقاف الصوت", sp)
+                          .setOngoing(ongoing).setAutoCancel(!ongoing);
+                  if (ongoing) b.setFullScreenIntent(pi, true);
+                  return b.build();
+              }
+ 
+              private void chime(final Runnable done) {
+                  try {
+                      Uri u = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                      mp = new MediaPlayer();
+                      mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
+                              .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
+                      mp.setDataSource(this, u);
+                      mp.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+                          @Override public void onCompletion(MediaPlayer m) { done.run(); }
+                      });
+                      mp.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                          @Override public boolean onError(MediaPlayer m, int w, int e) { done.run(); return true; }
+                      });
+                      mp.prepare();
+                      mp.start();
+                  } catch (Exception e) {
+                      done.run();
+                  }
+              }
+ 
+              private void speak(final String text, final int my) {
+                  if (text == null || text.trim().isEmpty()) { finish(); return; }
+                  tts = new TextToSpeech(getApplicationContext(), new TextToSpeech.OnInitListener() {
+                      @Override public void onInit(int status) {
+                          if (my != gen) return;
+                          if (status != TextToSpeech.SUCCESS || tts == null) { finish(); return; }
+                          try { tts.setLanguage(new Locale("ar")); } catch (Exception ignored) {}
+                          try {
+                              tts.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
+                                      .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                          } catch (Exception ignored) {}
+                          tts.setSpeechRate(0.9f);
+                          tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                              @Override public void onStart(String id) {}
+                              @Override public void onError(String id) { if ("last".equals(id)) h.post(new Runnable() { @Override public void run() { finish(); } }); }
+                              @Override public void onDone(String id) { if ("last".equals(id)) h.post(new Runnable() { @Override public void run() { finish(); } }); }
+                          });
+                          tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "a");
+                          tts.playSilentUtterance(1500, TextToSpeech.QUEUE_ADD, "s1");
+                          tts.speak(text, TextToSpeech.QUEUE_ADD, null, "b");
+                          tts.playSilentUtterance(1500, TextToSpeech.QUEUE_ADD, "s2");
+                          tts.speak(text, TextToSpeech.QUEUE_ADD, null, "last");
+                      }
+                  });
+              }
+ 
+              private void releasePlayers() {
+                  try { if (mp != null) { mp.release(); } } catch (Exception ignored) {}
+                  mp = null;
+                  try { if (tts != null) { tts.stop(); tts.shutdown(); } } catch (Exception ignored) {}
+                  tts = null;
+              }
+ 
+              private void finish() {
+                  releasePlayers();
+                  try { if (wl != null && wl.isHeld()) wl.release(); } catch (Exception ignored) {}
+                  if (Build.VERSION.SDK_INT >= 24) stopForeground(Service.STOP_FOREGROUND_DETACH); else stopForeground(false);
+                  try { ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(NID, build(lastTitle, lastBody, false)); } catch (Exception ignored) {}
+                  stopSelf();
+              }
+ 
+              @Override public void onDestroy() { releasePlayers(); super.onDestroy(); }
+          }
+          EOF_5
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/BootReceiver.java' <<'EOF_6'
+          package app.elagi;
+ 
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+ 
+          public class BootReceiver extends BroadcastReceiver {
+              @Override
+              public void onReceive(Context c, Intent intent) {
+                  AlarmScheduler.scheduleAll(c);
+              }
+          }
+          EOF_6
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/MainActivity.java' <<'EOF_7'
+          package app.elagi;
+ 
+          import android.Manifest;
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.MediaStore;
+          import android.view.ViewGroup;
+          import android.view.WindowManager;
+          import android.webkit.CookieManager;
+          import android.webkit.GeolocationPermissions;
+          import android.webkit.PermissionRequest;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.FrameLayout;
+ 
+          import androidx.core.content.FileProvider;
+ 
+          import java.io.File;
+          import java.io.InputStream;
+          import java.util.ArrayList;
+ 
+          public class MainActivity extends Activity {
+              private static final String START = "https://omg-medtech.github.io/Elagi-app/";
+              private static final int REQ_FILE = 51, REQ_PERM = 52;
+              static volatile boolean visible = false;
+              private WebView web;
+              private ValueCallback<Uri[]> fileCb;
+              private Uri camUri;
+              private String inject = "";
+ 
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  showOverLock(getIntent());
+                  try {
+                      InputStream is = getAssets().open("inject.js");
+                      byte[] buf = new byte[is.available()];
+                      is.read(buf);
+                      is.close();
+                      inject = new String(buf, "UTF-8");
+                  } catch (Exception ignored) {}
+ 
+                  web = new WebView(this);
+                  setContentView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setGeolocationEnabled(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  s.setCacheMode(WebSettings.LOAD_DEFAULT);
+                  s.setAllowFileAccess(false);
+                  s.setUserAgentString(s.getUserAgentString() + " ElagiAPK/1.0");
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
+                  web.addJavascriptInterface(new WebBridge(getApplicationContext()), "AndroidElagi");
+ 
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override public void onPageStarted(WebView v, String url, android.graphics.Bitmap f) { v.evaluateJavascript(inject, null); }
+                      @Override public void onPageFinished(WebView v, String url) { v.evaluateJavascript(inject, null); }
+                      @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                          Uri u = r.getUrl();
+                          String sc = u.getScheme();
+                          if ("https".equals(sc) || "http".equals(sc)) {
+                              String host = u.getHost() == null ? "" : u.getHost();
+                              if (host.endsWith("github.io") || host.endsWith("supabase.co") || host.endsWith("supabase.com")) return false;
+                              try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) {}
+                              return true;
+                          }
+                          if ("blob".equals(sc) || "data".equals(sc) || "about".equals(sc)) return false;
+                          try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) {}
+                          return true;
+                      }
+                  });
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback cb) { cb.invoke(origin, true, false); }
+                      @Override public void onPermissionRequest(final PermissionRequest r) { runOnUiThread(new Runnable() { @Override public void run() { r.grant(r.getResources()); } }); }
+                      @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) { return chooseFile(cb); }
+                  });
+                  web.setDownloadListener(new android.webkit.DownloadListener() {
+                      @Override public void onDownloadStart(String url, String ua, String cd, String mime, long len) {
+                          if (url != null && url.startsWith("blob:")) {
+                              String name = android.webkit.URLUtil.guessFileName(url, cd, mime);
+                              String js = "(function(){fetch('" + url + "').then(function(r){return r.blob()}).then(function(bl){var fr=new FileReader();fr.onloadend=function(){var d=String(fr.result);AndroidElagi.saveFile('" + name.replace("'", "") + "','" + (mime == null ? "" : mime) + "',d.substring(d.indexOf(',')+1))};fr.readAsDataURL(bl)})})()";
+                              web.evaluateJavascript(js, null);
+                          } else if (url != null) {
+                              try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) {}
+                          }
+                      }
+                  });
+ 
+                  askPermissions();
+                  if (b != null) web.restoreState(b); else web.loadUrl(START);
+              }
+ 
+              private void showOverLock(Intent i) {
+                  if (i != null && i.getBooleanExtra("alarm", false)) {
+                      if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); }
+                      else getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+                      getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  }
+              }
+ 
+              @Override
+              protected void onNewIntent(Intent i) {
+                  super.onNewIntent(i);
+                  setIntent(i);
+                  showOverLock(i);
+                  if (web != null) web.evaluateJavascript("try{checkDue()}catch(e){}", null);
+              }
+ 
+              private void askPermissions() {
+                  ArrayList<String> need = new ArrayList<String>();
+                  if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) need.add(Manifest.permission.POST_NOTIFICATIONS);
+                  if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) need.add(Manifest.permission.ACCESS_FINE_LOCATION);
+                  if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) need.add(Manifest.permission.CAMERA);
+                  if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ_PERM);
+              }
+ 
+              private boolean chooseFile(ValueCallback<Uri[]> cb) {
+                  if (fileCb != null) fileCb.onReceiveValue(null);
+                  fileCb = cb;
+                  Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+                  pick.addCategory(Intent.CATEGORY_OPENABLE);
+                  pick.setType("image/*");
+                  Intent chooser = Intent.createChooser(pick, "اختر صورة الدواء");
+                  try {
+                      File f = File.createTempFile("cam_", ".jpg", getCacheDir());
+                      camUri = FileProvider.getUriForFile(this, "app.elagi.files", f);
+                      Intent cam = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                      cam.putExtra(MediaStore.EXTRA_OUTPUT, camUri);
+                      cam.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                      chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cam});
+                  } catch (Exception e) {
+                      camUri = null;
+                  }
+                  try {
+                      startActivityForResult(chooser, REQ_FILE);
+                  } catch (Exception e) {
+                      fileCb = null;
+                      cb.onReceiveValue(null);
+                      return false;
+                  }
+                  return true;
+              }
+ 
+              @Override
+              protected void onActivityResult(int req, int res, Intent data) {
+                  if (req != REQ_FILE) { super.onActivityResult(req, res, data); return; }
+                  Uri[] out = null;
+                  if (res == RESULT_OK) {
+                      if (data != null && data.getData() != null) out = new Uri[]{data.getData()};
+                      else if (camUri != null) out = new Uri[]{camUri};
+                  }
+                  if (fileCb != null) { fileCb.onReceiveValue(out); fileCb = null; }
+              }
+ 
+              @Override
+              protected void onSaveInstanceState(Bundle b) { super.onSaveInstanceState(b); if (web != null) web.saveState(b); }
+ 
+              @Override
+              public void onBackPressed() {
+                  if (web != null && web.canGoBack()) web.goBack(); else moveTaskToBack(true);
+              }
+ 
+              @Override protected void onResume() { super.onResume(); visible = true; if (web != null) web.onResume(); }
+              @Override protected void onPause() { super.onPause(); visible = false; if (web != null) web.onPause(); }
+          }
+          EOF_7
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/WebBridge.java' <<'EOF_8'
+          package app.elagi;
+ 
+          import android.content.ContentValues;
+          import android.content.Context;
+          import android.os.Build;
+          import android.os.Environment;
+          import android.provider.MediaStore;
+          import android.util.Base64;
+          import android.webkit.JavascriptInterface;
+          import android.widget.Toast;
+ 
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.OutputStream;
+ 
+          /** Exposed to the page as window.AndroidElagi. */
+          public class WebBridge {
+              private final Context ctx;
+              WebBridge(Context c) { ctx = c; }
+ 
+              @JavascriptInterface
+              public void sync(String json) { AlarmScheduler.sync(ctx, json); }
+ 
+              @JavascriptInterface
+              public void saveFile(String name, String mime, String b64) {
+                  try {
+                      byte[] data = Base64.decode(b64, Base64.DEFAULT);
+                      if (name == null || name.trim().isEmpty()) name = "elagi-" + System.currentTimeMillis() + ".pdf";
+                      if (Build.VERSION.SDK_INT >= 29) {
+                          ContentValues v = new ContentValues();
+                          v.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                          v.put(MediaStore.Downloads.MIME_TYPE, mime == null || mime.isEmpty() ? "application/octet-stream" : mime);
+                          v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                          android.net.Uri u = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                          if (u == null) throw new Exception("insert");
+                          OutputStream o = ctx.getContentResolver().openOutputStream(u);
+                          o.write(data);
+                          o.close();
+                      } else {
+                          File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                          dir.mkdirs();
+                          FileOutputStream o = new FileOutputStream(new File(dir, name));
+                          o.write(data);
+                          o.close();
+                      }
+                      toast("تم الحفظ في مجلد التنزيلات: " + name);
+                  } catch (Exception e) {
+                      toast("تعذّر حفظ الملف");
+                  }
+              }
+ 
+              private void toast(final String m) {
+                  android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                  h.post(new Runnable() { @Override public void run() { Toast.makeText(ctx, m, Toast.LENGTH_LONG).show(); } });
+              }
+          }
+          EOF_8
+          mkdir -p "app/src/main/res/drawable"
+          cat > 'app/src/main/res/drawable/ic_stat.xml' <<'EOF_9'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+            <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.63,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.64,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"/>
+          </vector>
+          EOF_9
+          mkdir -p "app/src/main/res/xml"
+          cat > 'app/src/main/res/xml/file_paths.xml' <<'EOF_10'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths><cache-path name="cam" path="."/></paths>
+          EOF_10
+          cat > 'build.gradle' <<'EOF_11'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF_11
+          cat > 'gradle.properties' <<'EOF_12'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF_12
+          cat > 'settings.gradle' <<'EOF_13'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = "Elagi"
+          include ":app"
+          EOF_13
+          pip install pillow -q || true
+          python3 - <<'PYEOF'
+          import os,urllib.request
+          from PIL import Image
+          import io
+          try:
+              data=urllib.request.urlopen("https://omg-medtech.github.io/Elagi-app/icons/icon-512.png",timeout=20).read()
+              src=Image.open(io.BytesIO(data)).convert("RGBA")
+          except Exception:
+              src=Image.new("RGBA",(512,512),(4,160,147,255))
+          for d,sz in [("mdpi",48),("hdpi",72),("xhdpi",96),("xxhdpi",144),("xxxhdpi",192)]:
+              p="app/src/main/res/mipmap-"+d;os.makedirs(p,exist_ok=True)
+              im=src.resize((sz,sz));im.save(p+"/ic_launcher.png");im.save(p+"/ic_launcher_round.png")
+          PYEOF
+          cp -r /tmp/proj/. "$GITHUB_WORKSPACE/proj"  2>/dev/null || { mkdir -p "$GITHUB_WORKSPACE/proj"; cp -r /tmp/proj/. "$GITHUB_WORKSPACE/proj"; }
+      - name: Build
+        working-directory: proj
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Elagi-apk
+          path: proj/app/build/outputs/apk/debug/app-debug.apk
