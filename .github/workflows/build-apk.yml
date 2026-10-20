@@ -153,6 +153,90 @@ jobs:
                 Voice.stop=function(){try{AndroidElagi.stopSpeak()}catch(e){}};
                 clearInterval(vv);
               }}catch(e){}},500);
+
+            /* ---- own time / date pickers (the system dialogs get cut off on some phones) ---- */
+            var PCSS=false;
+            function pcss(){
+              if(PCSS||!document.head)return;PCSS=true;
+              var s=document.createElement("style");
+              s.textContent=".elp-bg{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;font-family:inherit}"+
+              ".elp{width:100%;max-width:480px;background:var(--card,#fff);color:var(--ink,#3D464B);border-radius:24px 24px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.3)}"+
+              ".elp h4{margin:0 0 10px;text-align:center;font-size:18px}"+
+              ".elr{display:flex;direction:ltr;gap:6px;position:relative}"+
+              ".elwrap{position:relative;flex:1;height:220px}"+
+              ".elw{position:relative;z-index:1;height:100%;overflow-y:scroll;scroll-snap-type:y mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}"+
+              ".elw::-webkit-scrollbar{display:none}"+
+              ".elw div{height:44px;line-height:44px;text-align:center;font-size:22px;font-weight:600;scroll-snap-align:center;color:var(--ink-2,#5E6A70)}"+
+              ".elw div.sp{height:88px;scroll-snap-align:none}"+
+              ".elband{position:absolute;left:0;right:0;top:88px;height:44px;border-radius:12px;background:var(--teal-soft,#E2F5F3);opacity:.7;pointer-events:none}"+
+              ".elp .ra{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}"+
+              ".elp .ra button{min-height:52px;border-radius:16px;border:2px solid var(--teal,#04A093);background:transparent;color:var(--teal,#04A093);font:700 17px inherit;font-family:inherit}"+
+              ".elp .ra button.ok{background:var(--teal,#04A093);color:#fff}";
+              document.head.appendChild(s);
+            }
+            function pad2(n){return(n<10?"0":"")+n}
+            function wheel(items,idx){
+              var wrap=document.createElement("div");wrap.className="elwrap";
+              var w=document.createElement("div");w.className="elw";
+              var a=document.createElement("div");a.className="sp";w.appendChild(a);
+              items.forEach(function(t){var d=document.createElement("div");d.textContent=t;w.appendChild(d)});
+              var b=document.createElement("div");b.className="sp";w.appendChild(b);
+              var band=document.createElement("div");band.className="elband";
+              wrap.appendChild(band);wrap.appendChild(w);
+              wrap.get=function(){return Math.max(0,Math.min(items.length-1,Math.round(w.scrollTop/44)))};
+              wrap.set=function(i){w.scrollTop=i*44};
+              wrap.init=idx;
+              return wrap;
+            }
+            function openSheet(title,wheels,onOk){
+              pcss();
+              var bg=document.createElement("div");bg.className="elp-bg";
+              var box=document.createElement("div");box.className="elp";
+              var h=document.createElement("h4");h.textContent=title;box.appendChild(h);
+              var row=document.createElement("div");row.className="elr";wheels.forEach(function(w){row.appendChild(w)});box.appendChild(row);
+              var ra=document.createElement("div");ra.className="ra";
+              var c=document.createElement("button");c.type="button";c.textContent="إلغاء";
+              var o=document.createElement("button");o.type="button";o.className="ok";o.textContent="تم";
+              ra.appendChild(c);ra.appendChild(o);box.appendChild(ra);bg.appendChild(box);document.body.appendChild(bg);
+              wheels.forEach(function(w){w.set(w.init)});
+              function close(){try{bg.remove()}catch(e){}}
+              c.onclick=close;bg.addEventListener("click",function(e){if(e.target===bg)close()});
+              o.onclick=function(){onOk();close()};
+            }
+            function setVal(inp,v){
+              var set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set;set.call(inp,v);
+              inp.dispatchEvent(new Event("input",{bubbles:true}));inp.dispatchEvent(new Event("change",{bubbles:true}));
+            }
+            function pickTime(inp){
+              var m=/^(\d{1,2}):(\d{2})/.exec(inp.value||""),h=m?+m[1]:9,mi=m?+m[2]:0,pm=h>=12,h12=h%12===0?12:h%12;
+              var hs=[],ms=[],i;for(i=1;i<=12;i++)hs.push(String(i));for(i=0;i<60;i++)ms.push(pad2(i));
+              var wh=wheel(hs,h12-1),wm=wheel(ms,mi),wa=wheel(["ص","م"],pm?1:0);
+              openSheet("اختر الوقت",[wh,wm,wa],function(){
+                var hh=wh.get()+1,p=wa.get()===1;if(hh===12)hh=0;if(p)hh+=12;
+                setVal(inp,pad2(hh)+":"+pad2(wm.get()));
+              });
+            }
+            function pickDate(inp){
+              var now=new Date(),mn=inp.min?new Date(inp.min+"T00:00:00"):new Date(1920,0,1),mx=inp.max?new Date(inp.max+"T00:00:00"):new Date(now.getFullYear()+10,11,31);
+              var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(inp.value||""),y=m?+m[1]:now.getFullYear(),mo=m?+m[2]:now.getMonth()+1,d=m?+m[3]:now.getDate();
+              var ys=[],i;for(i=mn.getFullYear();i<=mx.getFullYear();i++)ys.push(i);
+              var MN=["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"],ds=[];for(i=1;i<=31;i++)ds.push(String(i));
+              var wd=wheel(ds,d-1),wmo=wheel(MN,mo-1),wy=wheel(ys.map(String),Math.max(0,ys.indexOf(y)));
+              openSheet("اختر التاريخ",[wd,wmo,wy],function(){
+                var Y=ys[wy.get()],M=wmo.get()+1,D=wd.get()+1,last=new Date(Y,M,0).getDate();if(D>last)D=last;
+                var v=new Date(Y,M-1,D);if(v<mn)v=mn;if(v>mx)v=mx;
+                setVal(inp,v.getFullYear()+"-"+pad2(v.getMonth()+1)+"-"+pad2(v.getDate()));
+              });
+            }
+            document.addEventListener("click",function(e){
+              var t=e.target;if(!t||t.tagName!=="INPUT")return;
+              if(t.type==="time"||t.type==="date"){e.preventDefault();e.stopPropagation();try{t.blur()}catch(x){}if(t.type==="time")pickTime(t);else pickDate(t)}
+            },true);
+            window.__pick={pickTime:pickTime,pickDate:pickDate};
+
+            /* tell the native splash which theme the app uses */
+            function theme(){try{var m=localStorage.getItem("elagi.theme")||"auto";var d=m==="dark"||(m!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);AndroidElagi.setTheme(!!d)}catch(e){}}
+            setInterval(theme,4000);setTimeout(theme,1500);
             window.__nativeSync=sync;
             setInterval(sync,15000);setTimeout(sync,2500);
             document.addEventListener("visibilitychange",sync);
@@ -498,7 +582,99 @@ jobs:
           }
           EOF_6
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/MainActivity.java' <<'EOF_7'
+          cat > 'app/src/main/java/app/elagi/LogoView.java' <<'EOF_7'
+          package app.elagi;
+
+          import android.animation.ValueAnimator;
+          import android.content.Context;
+          import android.graphics.Canvas;
+          import android.graphics.Paint;
+          import android.graphics.Path;
+          import android.graphics.PathMeasure;
+          import android.view.View;
+          import android.view.animation.LinearInterpolator;
+
+          /** The pill logo that paints itself: coral half, teal half, then the check mark. */
+          public class LogoView extends View {
+              private final Paint coral = new Paint(Paint.ANTI_ALIAS_FLAG);
+              private final Paint teal = new Paint(Paint.ANTI_ALIAS_FLAG);
+              private final Paint check = new Paint(Paint.ANTI_ALIAS_FLAG);
+              private final Path capsule = new Path();
+              private final Path checkPath = new Path();
+              private final Path seg = new Path();
+              private float t = 0f;
+              private ValueAnimator anim;
+
+              public LogoView(Context c) {
+                  super(c);
+                  coral.setColor(0xFFEE7666);
+                  teal.setColor(0xFF04A093);
+                  check.setColor(0xFFFFFFFF);
+                  check.setStyle(Paint.Style.STROKE);
+                  check.setStrokeCap(Paint.Cap.ROUND);
+                  check.setStrokeJoin(Paint.Join.ROUND);
+              }
+
+              private static float ease(float x) {
+                  x = Math.max(0f, Math.min(1f, x));
+                  return x * x * (3f - 2f * x);
+              }
+
+              @Override
+              protected void onAttachedToWindow() {
+                  super.onAttachedToWindow();
+                  anim = ValueAnimator.ofFloat(0f, 3.7f);
+                  anim.setDuration(2800);
+                  anim.setInterpolator(new LinearInterpolator());
+                  anim.setRepeatCount(ValueAnimator.INFINITE);
+                  anim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                      @Override public void onAnimationUpdate(ValueAnimator a) { t = (Float) a.getAnimatedValue(); invalidate(); }
+                  });
+                  anim.start();
+              }
+
+              @Override
+              protected void onDetachedFromWindow() {
+                  if (anim != null) anim.cancel();
+                  super.onDetachedFromWindow();
+              }
+
+              @Override
+              protected void onDraw(Canvas c) {
+                  float s = Math.min(getWidth(), getHeight()), u = s / 200f;
+                  float L = 70f * u, R = 30f * u, g = 2f * u;
+                  capsule.reset();
+                  capsule.addRoundRect(-L, -R, L, R, R, R, Path.Direction.CW);
+
+                  c.save();
+                  c.translate(getWidth() / 2f, getHeight() / 2f);
+                  c.save();
+                  c.rotate(-45f);
+                  c.clipPath(capsule);
+                  float a = ease(t);                 // coral reveals from its outer end
+                  float b = ease(t - 1f);            // then teal
+                  if (a > 0f) c.drawRect(-L, -R, -L + (L - g) * a, R, coral);
+                  if (b > 0f) c.drawRect(L - (L - g) * b, -R, L, R, teal);
+                  c.restore();
+
+                  float k = ease(t - 2f);            // finally the check mark
+                  if (k > 0f) {
+                      checkPath.reset();
+                      checkPath.moveTo(-22f * u, 0f);
+                      checkPath.lineTo(-8f * u, 14f * u);
+                      checkPath.lineTo(24f * u, -18f * u);
+                      PathMeasure pm = new PathMeasure(checkPath, false);
+                      seg.reset();
+                      pm.getSegment(0f, pm.getLength() * k, seg, true);
+                      check.setStrokeWidth(11f * u);
+                      c.drawPath(seg, check);
+                  }
+                  c.restore();
+              }
+          }
+          EOF_7
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/MainActivity.java' <<'EOF_8'
           package app.elagi;
 
           import android.Manifest;
@@ -612,22 +788,34 @@ jobs:
                       }
                   });
 
+                  showSplash();
                   askPermissions();
                   if (!handleAuth(getIntent())) { if (b != null) web.restoreState(b); else web.loadUrl(START); }
               }
 
               void showSplash() {
                   if (splash != null || root == null) return;
-                  boolean night = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                  FrameLayout f = new FrameLayout(this);
-                  f.setBackgroundColor(night ? 0xFF0F1719 : 0xFFF6F9F9);
-                  android.widget.ProgressBar pb = new android.widget.ProgressBar(this);
-                  pb.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFF04A093));
-                  f.addView(pb, new FrameLayout.LayoutParams(140, 140, android.view.Gravity.CENTER));
+                  boolean dark;
+                  android.content.SharedPreferences sp = getSharedPreferences("elagi_setup", MODE_PRIVATE);
+                  if (sp.contains("dark")) dark = sp.getBoolean("dark", false);
+                  else dark = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                  android.widget.LinearLayout f = new android.widget.LinearLayout(this);
+                  f.setOrientation(android.widget.LinearLayout.VERTICAL);
+                  f.setGravity(android.view.Gravity.CENTER);
+                  f.setBackgroundColor(dark ? 0xFF0F1719 : 0xFFF6F9F9);
+                  float d = getResources().getDisplayMetrics().density;
+                  f.addView(new LogoView(this), new android.widget.LinearLayout.LayoutParams((int) (150 * d), (int) (150 * d)));
+                  android.widget.TextView tv = new android.widget.TextView(this);
+                  tv.setText("عِلاجي");
+                  tv.setTextColor(0xFF04A093);
+                  tv.setTextSize(30);
+                  tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                  tv.setGravity(android.view.Gravity.CENTER);
+                  f.addView(tv, new android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                   f.setClickable(true);
                   splash = f;
                   root.addView(f, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                  web.postDelayed(new Runnable() { @Override public void run() { hideSplash(); } }, 12000);
+                  web.postDelayed(new Runnable() { @Override public void run() { hideSplash(); } }, 20000);
               }
 
               void hideSplash() {
@@ -773,9 +961,9 @@ jobs:
               @Override protected void onResume() { super.onResume(); visible = true; if (web != null) web.onResume(); alarmSetup(); }
               @Override protected void onPause() { super.onPause(); visible = false; if (web != null) web.onPause(); }
           }
-          EOF_7
+          EOF_8
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/WebBridge.java' <<'EOF_8'
+          cat > 'app/src/main/java/app/elagi/WebBridge.java' <<'EOF_9'
           package app.elagi;
 
           import android.content.ContentValues;
@@ -853,6 +1041,11 @@ jobs:
               }
 
               @JavascriptInterface
+              public void setTheme(boolean dark) {
+                  ctx.getSharedPreferences("elagi_setup", Context.MODE_PRIVATE).edit().putBoolean("dark", dark).apply();
+              }
+
+              @JavascriptInterface
               public void ready() {
                   new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
                       @Override public void run() { if (MainActivity.cur != null) MainActivity.cur.hideSplash(); }
@@ -892,32 +1085,32 @@ jobs:
                   h.post(new Runnable() { @Override public void run() { Toast.makeText(ctx, m, Toast.LENGTH_LONG).show(); } });
               }
           }
-          EOF_8
+          EOF_9
           mkdir -p "app/src/main/res/drawable"
-          cat > 'app/src/main/res/drawable/ic_stat.xml' <<'EOF_9'
+          cat > 'app/src/main/res/drawable/ic_stat.xml' <<'EOF_10'
           <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
             <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.63,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.64,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"/>
           </vector>
-          EOF_9
+          EOF_10
           mkdir -p "app/src/main/res/xml"
-          cat > 'app/src/main/res/xml/file_paths.xml' <<'EOF_10'
+          cat > 'app/src/main/res/xml/file_paths.xml' <<'EOF_11'
           <?xml version="1.0" encoding="utf-8"?>
           <paths><cache-path name="cam" path="."/></paths>
-          EOF_10
-          cat > 'build.gradle' <<'EOF_11'
-          plugins { id 'com.android.application' version '8.5.2' apply false }
           EOF_11
-          cat > 'gradle.properties' <<'EOF_12'
+          cat > 'build.gradle' <<'EOF_12'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF_12
+          cat > 'gradle.properties' <<'EOF_13'
           org.gradle.jvmargs=-Xmx2g
           android.useAndroidX=true
           android.nonTransitiveRClass=true
-          EOF_12
-          cat > 'settings.gradle' <<'EOF_13'
+          EOF_13
+          cat > 'settings.gradle' <<'EOF_14'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = "Elagi"
           include ":app"
-          EOF_13
+          EOF_14
           pip install pillow -q || true
           python3 - <<'PYEOF'
           import os,urllib.request
