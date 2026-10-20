@@ -1296,6 +1296,20 @@ function fileIn(inp){
 if(sb)sb.auth.onAuthStateChange((event)=>{
   if(event==="PASSWORD_RECOVERY"){S.recoveryMode=true;S.err="";S.view="resetPassword";render();}
 });
+/* splash while a saved / returning sign-in is being restored, so the welcome screen never flashes */
+let bootEl=null;
+try{
+  let has=/[#&?](access_token|code)=/.test(location.hash+location.search);
+  if(!has)for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||"";if(/^sb-.*-auth-token$/.test(k)){has=true;break}}
+  if(has){
+    bootEl=document.createElement("div");
+    bootEl.style.cssText="position:fixed;inset:0;z-index:99;background:#F6F9F9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;color:#04A093;font:700 22px/1.2 system-ui,sans-serif";
+    bootEl.innerHTML='<div style="width:44px;height:44px;border:4px solid #CFE9E6;border-top-color:#04A093;border-radius:50%;animation:bootspin .8s linear infinite"></div><div>عِلاجي</div><style>@keyframes bootspin{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(bootEl);
+    setTimeout(()=>{try{bootEl&&bootEl.remove()}catch{}bootEl=null},12000);
+  }
+}catch{}
+const bootDone=()=>{try{bootEl&&bootEl.remove()}catch{}bootEl=null};
 render();
 (async()=>{
   try{
@@ -1305,6 +1319,7 @@ render();
     if(!data.session?.user)return;
     await resumeAccount(data.session.user);
   }catch(e){console.error("Elagi boot failed",e);toast("تعذّر استعادة الجلسة أو بيانات الحساب. سجّل الدخول مجددًا.")}
+  finally{bootDone()}
 })();
 </script>
 <script>
