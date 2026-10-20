@@ -97,6 +97,14 @@ jobs:
                       </intent-filter>
                   </activity>
 
+                  <activity android:name=".AlarmActivity"
+                      android:exported="false"
+                      android:launchMode="singleTop"
+                      android:taskAffinity=""
+                      android:excludeFromRecents="true"
+                      android:showWhenLocked="true"
+                      android:turnScreenOn="true"/>
+
                   <receiver android:name=".AlarmReceiver" android:exported="false"/>
                   <receiver android:name=".BootReceiver" android:exported="true">
                       <intent-filter>
@@ -243,7 +251,152 @@ jobs:
           })();
           EOF_2
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/AlarmReceiver.java' <<'EOF_3'
+          cat > 'app/src/main/java/app/elagi/AlarmActivity.java' <<'EOF_3'
+          package app.elagi;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.WindowManager;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import org.json.JSONObject;
+
+          /** Lightweight native alarm screen: appears instantly over the lock screen (no web page to wait for). */
+          public class AlarmActivity extends Activity {
+              private String id = "", title = "عِلاجي", body = "", text = "";
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); }
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                          | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+                  read(getIntent());
+                  build();
+              }
+
+              @Override
+              protected void onNewIntent(Intent i) {
+                  super.onNewIntent(i);
+                  setIntent(i);
+                  read(i);
+                  build();
+              }
+
+              private void read(Intent i) {
+                  if (i == null) return;
+                  String v;
+                  if ((v = i.getStringExtra("id")) != null) id = v;
+                  if ((v = i.getStringExtra("title")) != null) title = v;
+                  if ((v = i.getStringExtra("body")) != null) body = v;
+                  if ((v = i.getStringExtra("text")) != null) text = v;
+              }
+
+              private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
+
+              private Button btn(String label, boolean primary, View.OnClickListener l) {
+                  Button x = new Button(this);
+                  x.setText(label);
+                  x.setAllCaps(false);
+                  x.setTextSize(18);
+                  x.setTypeface(Typeface.DEFAULT_BOLD);
+                  x.setTextColor(primary ? 0xFF04A093 : Color.WHITE);
+                  GradientDrawable g = new GradientDrawable();
+                  g.setCornerRadius(dp(18));
+                  if (primary) g.setColor(Color.WHITE); else { g.setColor(0x33FFFFFF); g.setStroke(dp(2), 0x88FFFFFF); }
+                  x.setBackground(g);
+                  x.setOnClickListener(l);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58));
+                  lp.topMargin = dp(12);
+                  x.setLayoutParams(lp);
+                  return x;
+              }
+
+              private void build() {
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setGravity(Gravity.CENTER);
+                  root.setBackgroundColor(0xFF04A093);
+                  root.setPadding(dp(28), dp(40), dp(28), dp(40));
+                  root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+
+                  TextView icon = new TextView(this);
+                  icon.setText("💊");
+                  icon.setTextSize(64);
+                  icon.setGravity(Gravity.CENTER);
+                  root.addView(icon);
+
+                  TextView t1 = new TextView(this);
+                  t1.setText("حان موعد التنبيه");
+                  t1.setTextColor(0xFFE0F5F2);
+                  t1.setTextSize(18);
+                  t1.setGravity(Gravity.CENTER);
+                  t1.setPadding(0, dp(8), 0, 0);
+                  root.addView(t1);
+
+                  TextView t2 = new TextView(this);
+                  t2.setText(body.isEmpty() ? title : body);
+                  t2.setTextColor(Color.WHITE);
+                  t2.setTextSize(34);
+                  t2.setTypeface(Typeface.DEFAULT_BOLD);
+                  t2.setGravity(Gravity.CENTER);
+                  t2.setPadding(0, dp(8), 0, dp(6));
+                  root.addView(t2);
+
+                  TextView t3 = new TextView(this);
+                  t3.setText(text);
+                  t3.setTextColor(0xFFE0F5F2);
+                  t3.setTextSize(19);
+                  t3.setGravity(Gravity.CENTER);
+                  t3.setPadding(0, 0, 0, dp(24));
+                  root.addView(t3);
+
+                  root.addView(btn("فتح التطبيق", true, new View.OnClickListener() {
+                      @Override public void onClick(View v) {
+                          Intent i = new Intent(AlarmActivity.this, MainActivity.class);
+                          i.putExtra("alarm", true);
+                          i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                          startActivity(i);
+                          stopSound();
+                          finish();
+                      }
+                  }));
+                  root.addView(btn("إيقاف الصوت", false, new View.OnClickListener() {
+                      @Override public void onClick(View v) { stopSound(); }
+                  }));
+                  root.addView(btn("ذكّرني بعد 10 دقائق", false, new View.OnClickListener() {
+                      @Override public void onClick(View v) {
+                          try {
+                              JSONObject o = new JSONObject();
+                              o.put("id", "snooze_" + id);
+                              o.put("at", System.currentTimeMillis() + 10 * 60 * 1000L);
+                              o.put("title", title); o.put("body", body); o.put("text", text);
+                              AlarmScheduler.addOne(getApplicationContext(), o);
+                          } catch (Exception ignored) {}
+                          stopSound();
+                          finish();
+                      }
+                  }));
+                  setContentView(root);
+              }
+
+              private void stopSound() {
+                  try { startService(new Intent(this, AlarmService.class).setAction("STOP")); } catch (Exception ignored) {}
+              }
+          }
+          EOF_3
+          mkdir -p "app/src/main/java/app/elagi"
+          cat > 'app/src/main/java/app/elagi/AlarmReceiver.java' <<'EOF_4'
           package app.elagi;
 
           import android.content.BroadcastReceiver;
@@ -268,9 +421,9 @@ jobs:
                   }
               }
           }
-          EOF_3
+          EOF_4
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/AlarmScheduler.java' <<'EOF_4'
+          cat > 'app/src/main/java/app/elagi/AlarmScheduler.java' <<'EOF_5'
           package app.elagi;
 
           import android.app.AlarmManager;
@@ -315,7 +468,7 @@ jobs:
                   JSONArray prev = load(c);
                   for (int k = 0; k < prev.length(); k++) {
                       JSONObject x = prev.optJSONObject(k);
-                      if (x != null && "test".equals(x.optString("id")) && x.optLong("at") > System.currentTimeMillis()) fresh.put(x);
+                      if (x != null && (x.optString("id").equals("test") || x.optString("id").startsWith("snooze_")) && x.optLong("at") > System.currentTimeMillis()) fresh.put(x);
                   }
                   if (fresh.toString().equals(sp.getString(KEY, ""))) return;
                   cancelAll(c);
@@ -327,7 +480,7 @@ jobs:
                   JSONArray arr = load(c);
                   JSONArray n = new JSONArray();
                   try {
-                      for (int k = 0; k < arr.length(); k++) { JSONObject x = arr.optJSONObject(k); if (x != null && !"test".equals(x.optString("id"))) n.put(x); }
+                      for (int k = 0; k < arr.length(); k++) { JSONObject x = arr.optJSONObject(k); if (x != null && !x.optString("id").equals(o.optString("id")) && x.optLong("at") > System.currentTimeMillis()) n.put(x); }
                       n.put(o);
                   } catch (Exception ignored) {}
                   c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, n.toString()).apply();
@@ -370,9 +523,9 @@ jobs:
                   }
               }
           }
-          EOF_4
+          EOF_5
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/AlarmService.java' <<'EOF_5'
+          cat > 'app/src/main/java/app/elagi/AlarmService.java' <<'EOF_6'
           package app.elagi;
 
           import android.app.Notification;
@@ -408,7 +561,7 @@ jobs:
               private MediaPlayer mp;
               private PowerManager.WakeLock wl;
               private int gen = 0;
-              private String lastTitle = "عِلاجي", lastBody = "";
+              private String lastTitle = "عِلاجي", lastBody = "", lastText = "", lastId = "";
 
               @Override public IBinder onBind(Intent i) { return null; }
 
@@ -421,7 +574,8 @@ jobs:
                   final String text = intent != null ? intent.getStringExtra("text") : null;
                   if (title == null) title = "عِلاجي";
                   if (body == null) body = "";
-                  lastTitle = title; lastBody = body;
+                  lastTitle = title; lastBody = body; lastText = text == null ? "" : text;
+                  lastId = intent != null && intent.getStringExtra("id") != null ? intent.getStringExtra("id") : "";
                   channel();
                   Notification n = build(title, body, true);
                   try {
@@ -460,7 +614,7 @@ jobs:
                       Notification n = new NotificationCompat.Builder(c, "elagi_alarm2").setSmallIcon(R.drawable.ic_stat)
                               .setContentTitle(title == null ? "عِلاجي" : title).setContentText(body == null ? "" : body)
                               .setPriority(NotificationCompat.PRIORITY_MAX).setCategory(NotificationCompat.CATEGORY_ALARM)
-                              .setContentIntent(pi).setFullScreenIntent(pi, true).setAutoCancel(true).build();
+                              .setContentIntent(pi).setFullScreenIntent(PendingIntent.getActivity(c, 15, new Intent(c, AlarmActivity.class).putExtra("title", title).putExtra("body", body).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT), true).setAutoCancel(true).build();
                       nm.notify(4202, n);
                   } catch (Exception ignored) {}
               }
@@ -492,7 +646,13 @@ jobs:
                           .setContentIntent(pi)
                           .addAction(0, "إيقاف الصوت", sp)
                           .setOngoing(ongoing).setAutoCancel(!ongoing);
-                  if (ongoing) b.setFullScreenIntent(pi, true);
+                  if (ongoing) {
+                      Intent a = new Intent(this, AlarmActivity.class);
+                      a.putExtra("id", lastId); a.putExtra("title", title); a.putExtra("body", body); a.putExtra("text", lastText);
+                      a.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                      PendingIntent fp = PendingIntent.getActivity(this, 14, a, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                      b.setFullScreenIntent(fp, true);
+                  }
                   return b.build();
               }
 
@@ -565,9 +725,9 @@ jobs:
 
               @Override public void onDestroy() { releasePlayers(); super.onDestroy(); }
           }
-          EOF_5
+          EOF_6
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/BootReceiver.java' <<'EOF_6'
+          cat > 'app/src/main/java/app/elagi/BootReceiver.java' <<'EOF_7'
           package app.elagi;
 
           import android.content.BroadcastReceiver;
@@ -580,9 +740,9 @@ jobs:
                   AlarmScheduler.scheduleAll(c);
               }
           }
-          EOF_6
+          EOF_7
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/LogoView.java' <<'EOF_7'
+          cat > 'app/src/main/java/app/elagi/LogoView.java' <<'EOF_8'
           package app.elagi;
 
           import android.animation.ValueAnimator;
@@ -672,9 +832,9 @@ jobs:
                   c.restore();
               }
           }
-          EOF_7
+          EOF_8
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/MainActivity.java' <<'EOF_8'
+          cat > 'app/src/main/java/app/elagi/MainActivity.java' <<'EOF_9'
           package app.elagi;
 
           import android.Manifest;
@@ -961,9 +1121,9 @@ jobs:
               @Override protected void onResume() { super.onResume(); visible = true; if (web != null) web.onResume(); alarmSetup(); }
               @Override protected void onPause() { super.onPause(); visible = false; if (web != null) web.onPause(); }
           }
-          EOF_8
+          EOF_9
           mkdir -p "app/src/main/java/app/elagi"
-          cat > 'app/src/main/java/app/elagi/WebBridge.java' <<'EOF_9'
+          cat > 'app/src/main/java/app/elagi/WebBridge.java' <<'EOF_10'
           package app.elagi;
 
           import android.content.ContentValues;
@@ -1085,32 +1245,32 @@ jobs:
                   h.post(new Runnable() { @Override public void run() { Toast.makeText(ctx, m, Toast.LENGTH_LONG).show(); } });
               }
           }
-          EOF_9
+          EOF_10
           mkdir -p "app/src/main/res/drawable"
-          cat > 'app/src/main/res/drawable/ic_stat.xml' <<'EOF_10'
+          cat > 'app/src/main/res/drawable/ic_stat.xml' <<'EOF_11'
           <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
             <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.63,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.64,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"/>
           </vector>
-          EOF_10
+          EOF_11
           mkdir -p "app/src/main/res/xml"
-          cat > 'app/src/main/res/xml/file_paths.xml' <<'EOF_11'
+          cat > 'app/src/main/res/xml/file_paths.xml' <<'EOF_12'
           <?xml version="1.0" encoding="utf-8"?>
           <paths><cache-path name="cam" path="."/></paths>
-          EOF_11
-          cat > 'build.gradle' <<'EOF_12'
-          plugins { id 'com.android.application' version '8.5.2' apply false }
           EOF_12
-          cat > 'gradle.properties' <<'EOF_13'
+          cat > 'build.gradle' <<'EOF_13'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF_13
+          cat > 'gradle.properties' <<'EOF_14'
           org.gradle.jvmargs=-Xmx2g
           android.useAndroidX=true
           android.nonTransitiveRClass=true
-          EOF_13
-          cat > 'settings.gradle' <<'EOF_14'
+          EOF_14
+          cat > 'settings.gradle' <<'EOF_15'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = "Elagi"
           include ":app"
-          EOF_14
+          EOF_15
           pip install pillow -q || true
           python3 - <<'PYEOF'
           import os,urllib.request
