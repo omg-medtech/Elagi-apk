@@ -10,9 +10,19 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: "17" }
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
-        with: { gradle-version: "8.7" }
+      - name: Prepare Android SDK
+        run: |
+          export ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}
+          SM=$(ls $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager | head -1)
+          yes | $SM --licenses > /dev/null || true
+          $SM "platforms;android-34" "build-tools;34.0.0" > /dev/null || true
+          echo "sdk.dir=$ANDROID_HOME" > /tmp/local.properties
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+      - name: Install Gradle 8.7
+        run: |
+          curl -sSL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/g.zip
+          sudo unzip -q /tmp/g.zip -d /opt
+          echo "/opt/gradle-8.7/bin" >> "$GITHUB_PATH"
       - name: Generate the Android project
         run: |
           set -e
@@ -697,12 +707,11 @@ jobs:
               p="app/src/main/res/mipmap-"+d;os.makedirs(p,exist_ok=True)
               im=src.resize((sz,sz));im.save(p+"/ic_launcher.png");im.save(p+"/ic_launcher_round.png")
           PYEOF
-          cp -r /tmp/proj/. "$GITHUB_WORKSPACE/proj"  2>/dev/null || { mkdir -p "$GITHUB_WORKSPACE/proj"; cp -r /tmp/proj/. "$GITHUB_WORKSPACE/proj"; }
+          cp /tmp/local.properties /tmp/proj/local.properties; cp -r /tmp/proj/. "$GITHUB_WORKSPACE/proj"  2>/dev/null || { mkdir -p "$GITHUB_WORKSPACE/proj"; cp -r /tmp/proj/. "$GITHUB_WORKSPACE/proj"; }
       - name: Build
         working-directory: proj
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: Elagi-apk
           path: proj/app/build/outputs/apk/debug/app-debug.apk
- 
