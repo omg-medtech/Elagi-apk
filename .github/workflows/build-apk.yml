@@ -146,6 +146,13 @@ jobs:
               }catch(e){}
             }
             var rdy=setInterval(function(){try{if(window.__bootDone||(window.S&&S.user)){AndroidElagi.ready();clearInterval(rdy)}}catch(e){}},300);
+            /* WebView has no usable speechSynthesis: route the app's voice through Android TTS */
+            var vv=setInterval(function(){try{
+              if(typeof Voice!=="undefined"&&Voice&&Voice.say){
+                Voice.say=function(parts){try{if(window.S&&S.user&&S.user.set&&S.user.set.voice===false)return;AndroidElagi.speak((parts||[]).map(function(p){return p.t}).filter(Boolean).join(". "))}catch(e){}};
+                Voice.stop=function(){try{AndroidElagi.stopSpeak()}catch(e){}};
+                clearInterval(vv);
+              }}catch(e){}},500);
             window.__nativeSync=sync;
             setInterval(sync,15000);setTimeout(sync,2500);
             document.addEventListener("visibilitychange",sync);
@@ -345,6 +352,9 @@ jobs:
                           wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "elagi:alarm");
                       }
                       if (!wl.isHeld()) wl.acquire(3 * 60 * 1000L);
+                      PowerManager pm2 = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                      PowerManager.WakeLock sw = pm2.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "elagi:screen");
+                      sw.acquire(20 * 1000L);
                   } catch (Exception ignored) {}
                   releasePlayers();
                   chime(new Runnable() { @Override public void run() { if (my == gen) speak(text, my); } });
@@ -696,6 +706,14 @@ jobs:
                               return;
                           }
                       }
+                      if (!sp.getBoolean("notif", false)) {
+                          android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+                          if (!nm.areNotificationsEnabled() && Build.VERSION.SDK_INT >= 26) {
+                              sp.edit().putBoolean("notif", true).apply();
+                              startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()));
+                              return;
+                          }
+                      }
                       if (!sp.getBoolean("battery", false)) {
                           android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
                           if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
@@ -792,6 +810,46 @@ jobs:
                       // keep the real schedule: merge with the saved list
                       AlarmScheduler.addOne(ctx, o);
                   } catch (Exception ignored) {}
+              }
+
+              private static android.speech.tts.TextToSpeech tts;
+              private static boolean ttsReady = false;
+              private static String pending = null;
+
+              @JavascriptInterface
+              public void speak(final String text) {
+                  new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                      @Override public void run() {
+                          try {
+                              if (tts == null) {
+                                  pending = text;
+                                  tts = new android.speech.tts.TextToSpeech(ctx, new android.speech.tts.TextToSpeech.OnInitListener() {
+                                      @Override public void onInit(int status) {
+                                          if (status != android.speech.tts.TextToSpeech.SUCCESS) { tts = null; return; }
+                                          try {
+                                              int r1 = tts.setLanguage(new java.util.Locale("ar"));
+                                              if (r1 == android.speech.tts.TextToSpeech.LANG_MISSING_DATA || r1 == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) tts.setLanguage(new java.util.Locale("ar", "EG"));
+                                          } catch (Exception ignored) {}
+                                          tts.setSpeechRate(0.9f);
+                                          ttsReady = true;
+                                          if (pending != null) { tts.speak(pending, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "w"); pending = null; }
+                                      }
+                                  });
+                              } else if (ttsReady) {
+                                  tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "w");
+                              } else {
+                                  pending = text;
+                              }
+                          } catch (Exception ignored) {}
+                      }
+                  });
+              }
+
+              @JavascriptInterface
+              public void stopSpeak() {
+                  new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                      @Override public void run() { try { if (tts != null && ttsReady) tts.stop(); pending = null; } catch (Exception ignored) {} }
+                  });
               }
 
               @JavascriptInterface
