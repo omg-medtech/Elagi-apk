@@ -141,6 +141,7 @@ jobs:
                 AndroidElagi.sync(JSON.stringify(L.slice(0,60)));
               }catch(e){}
             }
+            var rdy=setInterval(function(){try{if(window.__bootDone||(window.S&&S.user)){AndroidElagi.ready();clearInterval(rdy)}}catch(e){}},300);
             window.__nativeSync=sync;
             setInterval(sync,15000);setTimeout(sync,2500);
             document.addEventListener("visibilitychange",sync);
@@ -472,6 +473,9 @@ jobs:
               private static final String START = "https://omg-medtech.github.io/Elagi-app/";
               private static final int REQ_FILE = 51, REQ_PERM = 52;
               static volatile boolean visible = false;
+              static MainActivity cur;
+              private FrameLayout root;
+              private android.view.View splash;
               private WebView web;
               private ValueCallback<Uri[]> fileCb;
               private Uri camUri;
@@ -489,8 +493,11 @@ jobs:
                       inject = new String(buf, "UTF-8");
                   } catch (Exception ignored) {}
 
+                  cur = this;
                   web = new WebView(this);
-                  setContentView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  root = new FrameLayout(this);
+                  root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  setContentView(root, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                   WebSettings s = web.getSettings();
                   s.setJavaScriptEnabled(true);
                   s.setDomStorageEnabled(true);
@@ -543,6 +550,26 @@ jobs:
                   if (!handleAuth(getIntent())) { if (b != null) web.restoreState(b); else web.loadUrl(START); }
               }
 
+              void showSplash() {
+                  if (splash != null || root == null) return;
+                  boolean night = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                  FrameLayout f = new FrameLayout(this);
+                  f.setBackgroundColor(night ? 0xFF0F1719 : 0xFFF6F9F9);
+                  android.widget.ProgressBar pb = new android.widget.ProgressBar(this);
+                  pb.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFF04A093));
+                  f.addView(pb, new FrameLayout.LayoutParams(140, 140, android.view.Gravity.CENTER));
+                  f.setClickable(true);
+                  splash = f;
+                  root.addView(f, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  web.postDelayed(new Runnable() { @Override public void run() { hideSplash(); } }, 12000);
+              }
+
+              void hideSplash() {
+                  if (splash == null || root == null) return;
+                  root.removeView(splash);
+                  splash = null;
+              }
+
               private void openExternal(Uri u) {
                   try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) {}
               }
@@ -563,6 +590,7 @@ jobs:
                   if (d == null || !"elagi".equals(d.getScheme())) return false;
                   String q = d.getEncodedQuery(), f = d.getEncodedFragment();
                   String url = START + (q != null ? "?" + q : "") + (f != null ? "#" + f : "");
+                  showSplash();
                   if (web != null) web.loadUrl(url);
                   return true;
               }
@@ -666,6 +694,13 @@ jobs:
 
               @JavascriptInterface
               public void sync(String json) { AlarmScheduler.sync(ctx, json); }
+
+              @JavascriptInterface
+              public void ready() {
+                  new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                      @Override public void run() { if (MainActivity.cur != null) MainActivity.cur.hideSplash(); }
+                  });
+              }
 
               @JavascriptInterface
               public void saveFile(String name, String mime, String b64) {
